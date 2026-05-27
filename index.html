@@ -176,19 +176,23 @@
       position: relative;
       background: #000;
       line-height: 0;
+      width: 100%;
     }
 
     #video {
       width: 100%;
+      height: auto;
       display: block;
     }
 
-    /* Overlay canvas sits on top of video */
+    /* FIX: Force bounding canvas style to explicitly mirror the scaled video layout */
     #video-canvas {
       position: absolute;
-      top: 0; left: 0;
+      top: 0; 
+      left: 0;
       width: 100%;
       height: 100%;
+      object-fit: fill;
       pointer-events: none;
     }
 
@@ -671,6 +675,16 @@
     }
   }
 
+  // Sync canvas size handler
+  function syncCanvasSize() {
+    if (video.videoWidth) {
+      videoCanvas.width  = video.videoWidth;
+      videoCanvas.height = video.videoHeight;
+    }
+  }
+
+  window.addEventListener('resize', syncCanvasSize);
+
   async function restartStream() {
     // Stop existing stream tracks
     if (videoStream) {
@@ -692,10 +706,7 @@
       video.srcObject = videoStream;
       await video.play();
 
-      video.addEventListener('loadedmetadata', () => {
-        videoCanvas.width  = video.videoWidth;
-        videoCanvas.height = video.videoHeight;
-      }, { once: true });
+      video.addEventListener('loadedmetadata', syncCanvasSize, { once: true });
 
       // Hide start button, show stop button
       startCamBtn.style.display  = 'none';
