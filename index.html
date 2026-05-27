@@ -508,24 +508,17 @@
   startCamBtn.addEventListener('click', startCamera);
   stopCamBtn.addEventListener('click', stopCamera);
 
-  // Keep overlay canvas in sync with the displayed video size (not raw stream res)
-  const videoResizeObserver = new ResizeObserver(() => {
-    if (!videoStream) return;
-    videoCanvas.width  = video.clientWidth;
-    videoCanvas.height = video.clientHeight;
-  });
-  videoResizeObserver.observe(video);
-
   async function startCamera() {
     try {
       videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
       video.srcObject = videoStream;
       await video.play();
 
-      // Set initial canvas size once video is visible
+      // Canvas must match raw stream resolution so API coords map 1:1
+      // CSS width:100%/height:100% handles visual scaling automatically
       video.addEventListener('loadedmetadata', () => {
-        videoCanvas.width  = video.clientWidth;
-        videoCanvas.height = video.clientHeight;
+        videoCanvas.width  = video.videoWidth;
+        videoCanvas.height = video.videoHeight;
       }, { once: true });
 
       startCamBtn.disabled       = true;
@@ -566,11 +559,8 @@
         const base64 = captureVideoFrame();
         if (base64) {
           const predictions = await runInference(base64);
-          // Redraw overlay — scale from raw video res → displayed canvas size
           vCtx.clearRect(0, 0, videoCanvas.width, videoCanvas.height);
-          const scaleX = videoCanvas.width  / video.videoWidth;
-          const scaleY = videoCanvas.height / video.videoHeight;
-          drawBoxesOnContext(vCtx, videoCanvas.width, videoCanvas.height, predictions, scaleX, scaleY);
+          drawBoxesOnContext(vCtx, videoCanvas.width, videoCanvas.height, predictions);
           showDetections(predictions);
           setStatus(`${predictions.length} object${predictions.length !== 1 ? 's' : ''} detected`, predictions.length > 0 ? 'success' : '');
           resultsEl.style.display = 'block';
@@ -623,17 +613,15 @@
   // ── Drawing ──────────────────────────────────────────────────────────────────
   // For video mode: API coords are in raw video resolution, canvas is display resolution.
   // Pass scaleX/scaleY to map between them. For image mode both are 1.
-  function drawBoxesOnContext(context, canvasW, canvasH, predictions, scaleX = 1, scaleY = 1) {
+  function drawBoxesOnContext(context, canvasW, canvasH, predictions) {
     predictions.forEach(p => {
-      const x = (p.x - p.width  / 2) * scaleX;
-      const y = (p.y - p.height / 2) * scaleY;
-      const w = p.width  * scaleX;
-      const h = p.height * scaleY;
+      const x = p.x - p.width  / 2;
+      const y = p.y - p.height / 2;
       const conf = Math.round((p.confidence || 0) * 100);
 
       context.strokeStyle = '#c8f542';
       context.lineWidth   = Math.max(1.5, canvasW * 0.003);
-      context.strokeRect(x, y, w, h);
+      context.strokeRect(x, y, p.width, p.height);
 
       const label    = `${p.class || 'object'} ${conf}%`;
       const fontSize = Math.max(11, Math.min(16, canvasW * 0.022));
