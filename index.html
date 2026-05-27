@@ -104,6 +104,7 @@
       cursor: pointer;
       transition: border-color 0.2s, background 0.2s;
       position: relative;
+      display: block; /* label element */
     }
 
     #dropzone:hover, #dropzone.dragover {
@@ -111,30 +112,59 @@
       background: var(--accent-dim);
     }
 
-    #dropzone input {
+    /* Hidden input — label handles the click, no need for absolute overlay */
+    #file-input {
       position: absolute;
-      inset: 0;
+      width: 1px;
+      height: 1px;
       opacity: 0;
-      cursor: pointer;
-      width: 100%;
-      height: 100%;
-      z-index: 1;
+      pointer-events: none;
     }
 
     #dropzone .icon {
       font-size: 2rem;
       margin-bottom: 12px;
       opacity: 0.4;
+      pointer-events: none;
     }
 
     #dropzone p {
       font-family: var(--font-mono);
       font-size: 0.8rem;
       color: var(--muted);
+      pointer-events: none;
     }
 
     #dropzone p span {
       color: var(--accent);
+    }
+
+    /* X button on preview */
+    #preview-reset {
+      display: none;
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 30px;
+      height: 30px;
+      background: rgba(14,14,14,0.85);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 1rem;
+      line-height: 1;
+      cursor: pointer;
+      z-index: 10;
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-mono);
+    }
+
+    #preview-reset:hover {
+      color: var(--accent);
+      border-color: var(--accent);
+      background: rgba(14,14,14,0.95);
     }
 
     /* Camera section */
@@ -153,7 +183,7 @@
       display: block;
     }
 
-    /* Overlay canvas sits on top of video — must match video element pixels exactly */
+    /* Overlay canvas sits on top of video */
     #video-canvas {
       position: absolute;
       top: 0; left: 0;
@@ -168,8 +198,7 @@
       margin-top: 12px;
     }
 
-    #start-camera-btn, #stop-camera-btn {
-      flex: 1;
+    #start-camera-btn, #stop-camera-btn, #flip-camera-btn {
       padding: 12px;
       font-family: var(--font-mono);
       font-size: 0.8rem;
@@ -181,6 +210,7 @@
     }
 
     #start-camera-btn {
+      flex: 1;
       background: var(--accent);
       color: #0e0e0e;
       border-color: var(--accent);
@@ -190,12 +220,62 @@
     #start-camera-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
     #stop-camera-btn {
+      flex: 1;
       background: none;
       color: var(--muted);
       display: none;
     }
 
     #stop-camera-btn:hover { color: var(--text); border-color: var(--text); }
+
+    /* Flip / camera-switch button */
+    #flip-camera-btn {
+      display: none;
+      background: none;
+      color: var(--muted);
+      border-color: var(--border);
+      padding: 12px 16px;
+      font-size: 1rem;
+      letter-spacing: 0;
+    }
+
+    #flip-camera-btn:hover {
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+
+    #flip-camera-btn:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+
+    /* Camera selector dropdown (desktop) */
+    #camera-select-wrap {
+      display: none;
+      margin-top: 10px;
+    }
+
+    #camera-select {
+      width: 100%;
+      padding: 8px 12px;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23666' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      padding-right: 32px;
+    }
+
+    #camera-select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
 
     /* FPS indicator */
     #fps-indicator {
@@ -340,14 +420,15 @@
 
   <!-- IMAGE MODE -->
   <div id="image-section">
-    <div id="dropzone">
-      <input type="file" id="file-input" accept="image/*" />
+    <input type="file" id="file-input" accept="image/*" />
+    <label id="dropzone" for="file-input">
       <div class="icon">⊕</div>
       <p>Drop an image or <span>click to upload</span></p>
-    </div>
+    </label>
 
     <div id="preview-wrap">
       <canvas id="canvas"></canvas>
+      <button id="preview-reset" title="Remove image">×</button>
     </div>
 
     <button id="run-btn">Run Detection</button>
@@ -359,10 +440,18 @@
       <video id="video" autoplay muted playsinline></video>
       <canvas id="video-canvas"></canvas>
     </div>
+
     <div class="cam-controls">
       <button id="start-camera-btn">Start Camera</button>
+      <button id="flip-camera-btn" title="Switch camera">⇄</button>
       <button id="stop-camera-btn">Stop</button>
     </div>
+
+    <!-- Desktop: full camera selector dropdown -->
+    <div id="camera-select-wrap">
+      <select id="camera-select"></select>
+    </div>
+
     <div id="fps-indicator">Sending frame every <span id="fps-val">3</span>s — free tier rate limiting</div>
   </div>
 
@@ -378,36 +467,44 @@
 
 <script>
   const API_URL = 'https://roboflow-fatbike-demo.onrender.com/infer';
-  // Interval between frames sent to API (ms). 3s is safe for free Render tier.
   const VIDEO_INTERVAL_MS = 3000;
 
   // Elements
-  const dropzone     = document.getElementById('dropzone');
-  const fileInput    = document.getElementById('file-input');
-  const previewWrap  = document.getElementById('preview-wrap');
-  const canvas       = document.getElementById('canvas');
-  const ctx          = canvas.getContext('2d');
-  const runBtn       = document.getElementById('run-btn');
-  const statusEl     = document.getElementById('status');
-  const resultsEl    = document.getElementById('results');
-  const detectionsEl = document.getElementById('detections');
-  const resetBtn     = document.getElementById('reset');
-  const imageSection = document.getElementById('image-section');
-  const cameraSection= document.getElementById('camera-section');
-  const video        = document.getElementById('video');
-  const videoCanvas  = document.getElementById('video-canvas');
-  const vCtx         = videoCanvas.getContext('2d');
-  const startCamBtn  = document.getElementById('start-camera-btn');
-  const stopCamBtn   = document.getElementById('stop-camera-btn');
-  const fpsIndicator = document.getElementById('fps-indicator');
-  const fpsVal       = document.getElementById('fps-val');
+  const dropzone       = document.getElementById('dropzone');
+  const fileInput      = document.getElementById('file-input');
+  const previewWrap    = document.getElementById('preview-wrap');
+  const previewReset   = document.getElementById('preview-reset');
+  const canvas         = document.getElementById('canvas');
+  const ctx            = canvas.getContext('2d');
+  const runBtn         = document.getElementById('run-btn');
+  const statusEl       = document.getElementById('status');
+  const resultsEl      = document.getElementById('results');
+  const detectionsEl   = document.getElementById('detections');
+  const resetBtn       = document.getElementById('reset');
+  const imageSection   = document.getElementById('image-section');
+  const cameraSection  = document.getElementById('camera-section');
+  const video          = document.getElementById('video');
+  const videoCanvas    = document.getElementById('video-canvas');
+  const vCtx           = videoCanvas.getContext('2d');
+  const startCamBtn    = document.getElementById('start-camera-btn');
+  const stopCamBtn     = document.getElementById('stop-camera-btn');
+  const flipCamBtn     = document.getElementById('flip-camera-btn');
+  const cameraSelectWrap = document.getElementById('camera-select-wrap');
+  const cameraSelect   = document.getElementById('camera-select');
+  const fpsIndicator   = document.getElementById('fps-indicator');
+  const fpsVal         = document.getElementById('fps-val');
 
-  let currentImage  = null;
-  let currentBase64 = null;
-  let mode          = 'image'; // 'image' | 'video'
-  let videoStream   = null;
-  let videoTimer    = null;
-  let inferring     = false;   // prevent overlapping requests
+  let currentImage   = null;
+  let currentBase64  = null;
+  let mode           = 'image';
+  let videoStream    = null;
+  let videoTimer     = null;
+  let inferring      = false;
+
+  // Camera management
+  let availableCameras = [];   // [{deviceId, label}]
+  let currentCamIndex  = 0;   // index into availableCameras
+  let isMobile         = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
 
   fpsVal.textContent = (VIDEO_INTERVAL_MS / 1000).toFixed(0);
 
@@ -457,9 +554,9 @@
         canvas.width  = img.naturalWidth;
         canvas.height = img.naturalHeight;
         ctx.drawImage(img, 0, 0);
-        // Hide dropzone, show preview
         dropzone.style.display      = 'none';
         previewWrap.style.display   = 'block';
+        previewReset.style.display  = 'flex';
         runBtn.style.display        = 'block';
         resultsEl.style.display     = 'none';
         resetBtn.style.display      = 'none';
@@ -490,32 +587,117 @@
     }
   });
 
-  resetBtn.addEventListener('click', () => {
+  function clearImageState() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    previewWrap.style.display = 'none';
-    runBtn.style.display      = 'none';
-    resetBtn.style.display    = 'none';
-    resultsEl.style.display   = 'none';
-    // Show dropzone again
-    dropzone.style.display    = 'block';
+    previewWrap.style.display  = 'none';
+    previewReset.style.display = 'none';
+    runBtn.style.display       = 'none';
+    resetBtn.style.display     = 'none';
+    resultsEl.style.display    = 'none';
+    dropzone.style.display     = 'block';
     setStatus('');
-    fileInput.value   = '';
-    currentBase64     = null;
-    currentImage      = null;
-  });
+    fileInput.value  = '';
+    currentBase64    = null;
+    currentImage     = null;
+  }
+
+  previewReset.addEventListener('click', clearImageState);
+  resetBtn.addEventListener('click', clearImageState);
+
+  // ── Camera enumeration ───────────────────────────────────────────────────────
+  async function enumerateCameras() {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      availableCameras = devices
+        .filter(d => d.kind === 'videoinput')
+        .map((d, i) => ({
+          deviceId: d.deviceId,
+          label: d.label || `Camera ${i + 1}`
+        }));
+      return availableCameras.length;
+    } catch {
+      return 0;
+    }
+  }
 
   // ── Video mode ───────────────────────────────────────────────────────────────
   startCamBtn.addEventListener('click', startCamera);
   stopCamBtn.addEventListener('click', stopCamera);
 
+  flipCamBtn.addEventListener('click', async () => {
+    if (availableCameras.length < 2) return;
+    currentCamIndex = (currentCamIndex + 1) % availableCameras.length;
+    // If using dropdown on desktop, keep it in sync
+    if (!isMobile) cameraSelect.value = availableCameras[currentCamIndex].deviceId;
+    await restartStream();
+  });
+
+  cameraSelect.addEventListener('change', async () => {
+    const idx = availableCameras.findIndex(c => c.deviceId === cameraSelect.value);
+    if (idx >= 0) {
+      currentCamIndex = idx;
+      await restartStream();
+    }
+  });
+
   async function startCamera() {
+    // First get permission (needed before enumerateDevices returns labels)
     try {
-      videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      const tempStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      tempStream.getTracks().forEach(t => t.stop());
+    } catch (err) {
+      setStatus(`Camera permission denied: ${err.message}`, 'error');
+      return;
+    }
+
+    await enumerateCameras();
+    setupCameraUI();
+    await restartStream();
+  }
+
+  function setupCameraUI() {
+    const count = availableCameras.length;
+
+    if (count > 1) {
+      if (isMobile) {
+        // Mobile: simple flip button (front ↔ back)
+        flipCamBtn.style.display = 'inline-block';
+      } else {
+        // Desktop: dropdown listing all cameras
+        cameraSelect.innerHTML = '';
+        availableCameras.forEach((cam, i) => {
+          const opt = document.createElement('option');
+          opt.value = cam.deviceId;
+          opt.textContent = cam.label;
+          cameraSelect.appendChild(opt);
+        });
+        cameraSelect.value = availableCameras[currentCamIndex].deviceId;
+        cameraSelectWrap.style.display = 'block';
+      }
+    }
+  }
+
+  async function restartStream() {
+    // Stop existing stream tracks
+    if (videoStream) {
+      videoStream.getTracks().forEach(t => t.stop());
+      videoStream = null;
+    }
+    if (videoTimer) { clearTimeout(videoTimer); videoTimer = null; }
+
+    try {
+      let constraints;
+      if (availableCameras.length > 0 && availableCameras[currentCamIndex].deviceId) {
+        constraints = { video: { deviceId: { exact: availableCameras[currentCamIndex].deviceId } }, audio: false };
+      } else {
+        // Fallback: try environment-facing (rear) camera
+        constraints = { video: { facingMode: 'environment' }, audio: false };
+      }
+
+      videoStream = await navigator.mediaDevices.getUserMedia(constraints);
       video.srcObject = videoStream;
       await video.play();
 
-      // Canvas must match raw stream resolution so API coords map 1:1
-      // CSS width:100%/height:100% handles visual scaling automatically
       video.addEventListener('loadedmetadata', () => {
         videoCanvas.width  = video.videoWidth;
         videoCanvas.height = video.videoHeight;
@@ -526,7 +708,6 @@
       fpsIndicator.style.display = 'block';
       setStatus('Camera active — sending frames…');
 
-      // Kick off polling
       scheduleNextFrame();
     } catch (err) {
       setStatus(`Camera error: ${err.message}`, 'error');
@@ -541,10 +722,14 @@
     }
     video.srcObject = null;
     vCtx.clearRect(0, 0, videoCanvas.width, videoCanvas.height);
-    startCamBtn.disabled       = false;
-    stopCamBtn.style.display   = 'none';
-    fpsIndicator.style.display = 'none';
-    resultsEl.style.display    = 'none';
+    startCamBtn.disabled          = false;
+    stopCamBtn.style.display      = 'none';
+    flipCamBtn.style.display      = 'none';
+    cameraSelectWrap.style.display = 'none';
+    fpsIndicator.style.display    = 'none';
+    resultsEl.style.display       = 'none';
+    availableCameras              = [];
+    currentCamIndex               = 0;
     setStatus('');
   }
 
@@ -569,19 +754,17 @@
         setStatus(`Error: ${err.message}`, 'error');
       } finally {
         inferring = false;
-        if (videoStream) scheduleNextFrame(); // keep going only if camera still on
+        if (videoStream) scheduleNextFrame();
       }
     }, VIDEO_INTERVAL_MS);
   }
 
   function captureVideoFrame() {
     if (!video.videoWidth) return null;
-    // Use a temporary off-screen canvas to grab the frame
     const tmp = document.createElement('canvas');
     tmp.width  = video.videoWidth;
     tmp.height = video.videoHeight;
     tmp.getContext('2d').drawImage(video, 0, 0);
-    // Compress to JPEG at 0.8 quality to keep payload small for free tier
     return tmp.toDataURL('image/jpeg', 0.8).split(',')[1];
   }
 
@@ -611,8 +794,6 @@
   }
 
   // ── Drawing ──────────────────────────────────────────────────────────────────
-  // For video mode: API coords are in raw video resolution, canvas is display resolution.
-  // Pass scaleX/scaleY to map between them. For image mode both are 1.
   function drawBoxesOnContext(context, canvasW, canvasH, predictions) {
     predictions.forEach(p => {
       const x = p.x - p.width  / 2;
@@ -625,12 +806,34 @@
 
       const label    = `${p.class || 'object'} ${conf}%`;
       const fontSize = Math.max(11, Math.min(16, canvasW * 0.022));
-      context.font      = `500 ${fontSize}px 'IBM Plex Mono', monospace`;
-      const textW       = context.measureText(label).width;
+      context.font = `500 ${fontSize}px 'IBM Plex Mono', monospace`;
+      const textW  = context.measureText(label).width;
+      const tagH   = fontSize + 8;
+      const tagW   = textW + 10;
+
+      // FIX: if box is near the top, draw label inside/below the top edge
+      // instead of above (which gets clipped)
+      const LABEL_MARGIN = tagH + 2;
+      const labelAboveY  = y - LABEL_MARGIN;         // top of label bg if drawn above
+      const drawAbove    = labelAboveY >= 0;
+
+      let bgY, textY;
+      if (drawAbove) {
+        bgY   = y - tagH - 2;
+        textY = y - 6;
+      } else {
+        // draw label overlaid at the top of the box
+        bgY   = y + 2;
+        textY = y + tagH - 4;
+      }
+
+      // Clamp label horizontally so it doesn't overflow the right edge
+      const bgX = Math.min(x, canvasW - tagW - 2);
+
       context.fillStyle = '#c8f542';
-      context.fillRect(x, y - fontSize - 6, textW + 10, fontSize + 8);
+      context.fillRect(bgX, bgY, tagW, tagH);
       context.fillStyle = '#0e0e0e';
-      context.fillText(label, x + 5, y - 4);
+      context.fillText(label, bgX + 5, textY);
     });
   }
 
