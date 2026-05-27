@@ -64,6 +64,38 @@
       padding: 32px;
     }
 
+    /* Mode toggle */
+    #mode-toggle {
+      display: flex;
+      gap: 0;
+      margin-bottom: 24px;
+      border: 1px solid var(--border);
+      width: fit-content;
+    }
+
+    .mode-btn {
+      padding: 8px 20px;
+      background: none;
+      border: none;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .mode-btn.active {
+      background: var(--accent);
+      color: #0e0e0e;
+    }
+
+    .mode-btn:not(.active):hover {
+      color: var(--text);
+      background: var(--accent-dim);
+    }
+
     /* Drop zone */
     #dropzone {
       border: 1px dashed var(--border);
@@ -104,10 +136,82 @@
       color: var(--accent);
     }
 
-    /* Preview */
+    /* Camera section */
+    #camera-section {
+      display: none;
+    }
+
+    #video-wrap {
+      position: relative;
+      background: #000;
+      line-height: 0;
+    }
+
+    #video {
+      width: 100%;
+      display: block;
+    }
+
+    /* Overlay canvas sits on top of video */
+    #video-canvas {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .cam-controls {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    #start-camera-btn, #stop-camera-btn {
+      flex: 1;
+      padding: 12px;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      border: 1px solid var(--border);
+      cursor: pointer;
+      transition: opacity 0.2s, background 0.2s;
+    }
+
+    #start-camera-btn {
+      background: var(--accent);
+      color: #0e0e0e;
+      border-color: var(--accent);
+    }
+
+    #start-camera-btn:hover { opacity: 0.85; }
+    #start-camera-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    #stop-camera-btn {
+      background: none;
+      color: var(--muted);
+      display: none;
+    }
+
+    #stop-camera-btn:hover { color: var(--text); border-color: var(--text); }
+
+    /* FPS indicator */
+    #fps-indicator {
+      display: none;
+      margin-top: 10px;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+
+    #fps-indicator span {
+      color: var(--accent);
+    }
+
+    /* Preview (image mode) */
     #preview-wrap {
       display: none;
-      margin-top: 24px;
       position: relative;
     }
 
@@ -116,7 +220,7 @@
       display: block;
     }
 
-    /* Button */
+    /* Run button */
     #run-btn {
       display: none;
       margin-top: 20px;
@@ -226,17 +330,41 @@
 </header>
 
 <div class="card">
-  <div id="dropzone">
-    <input type="file" id="file-input" accept="image/*" />
-    <div class="icon">⊕</div>
-    <p>Drop an image or <span>click to upload</span></p>
+
+  <!-- Mode toggle -->
+  <div id="mode-toggle">
+    <button class="mode-btn active" data-mode="image">Image</button>
+    <button class="mode-btn" data-mode="video">Live Video</button>
   </div>
 
-  <div id="preview-wrap">
-    <canvas id="canvas"></canvas>
+  <!-- IMAGE MODE -->
+  <div id="image-section">
+    <div id="dropzone">
+      <input type="file" id="file-input" accept="image/*" />
+      <div class="icon">⊕</div>
+      <p>Drop an image or <span>click to upload</span></p>
+    </div>
+
+    <div id="preview-wrap">
+      <canvas id="canvas"></canvas>
+    </div>
+
+    <button id="run-btn">Run Detection</button>
   </div>
 
-  <button id="run-btn">Run Detection</button>
+  <!-- VIDEO MODE -->
+  <div id="camera-section">
+    <div id="video-wrap">
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="video-canvas"></canvas>
+    </div>
+    <div class="cam-controls">
+      <button id="start-camera-btn">Start Camera</button>
+      <button id="stop-camera-btn">Stop</button>
+    </div>
+    <div id="fps-indicator">Sending frame every <span id="fps-val">3</span>s — free tier rate limiting</div>
+  </div>
+
   <div id="status"></div>
 
   <div id="results">
@@ -249,22 +377,64 @@
 
 <script>
   const API_URL = 'https://roboflow-fatbike-demo.onrender.com/infer';
+  // Interval between frames sent to API (ms). 3s is safe for free Render tier.
+  const VIDEO_INTERVAL_MS = 3000;
 
-  const dropzone = document.getElementById('dropzone');
-  const fileInput = document.getElementById('file-input');
-  const previewWrap = document.getElementById('preview-wrap');
-  const canvas = document.getElementById('canvas');
-  const ctx = canvas.getContext('2d');
-  const runBtn = document.getElementById('run-btn');
-  const statusEl = document.getElementById('status');
-  const resultsEl = document.getElementById('results');
+  // Elements
+  const dropzone     = document.getElementById('dropzone');
+  const fileInput    = document.getElementById('file-input');
+  const previewWrap  = document.getElementById('preview-wrap');
+  const canvas       = document.getElementById('canvas');
+  const ctx          = canvas.getContext('2d');
+  const runBtn       = document.getElementById('run-btn');
+  const statusEl     = document.getElementById('status');
+  const resultsEl    = document.getElementById('results');
   const detectionsEl = document.getElementById('detections');
-  const resetBtn = document.getElementById('reset');
+  const resetBtn     = document.getElementById('reset');
+  const imageSection = document.getElementById('image-section');
+  const cameraSection= document.getElementById('camera-section');
+  const video        = document.getElementById('video');
+  const videoCanvas  = document.getElementById('video-canvas');
+  const vCtx         = videoCanvas.getContext('2d');
+  const startCamBtn  = document.getElementById('start-camera-btn');
+  const stopCamBtn   = document.getElementById('stop-camera-btn');
+  const fpsIndicator = document.getElementById('fps-indicator');
+  const fpsVal       = document.getElementById('fps-val');
 
-  let currentImage = null;
+  let currentImage  = null;
   let currentBase64 = null;
+  let mode          = 'image'; // 'image' | 'video'
+  let videoStream   = null;
+  let videoTimer    = null;
+  let inferring     = false;   // prevent overlapping requests
 
-  // Drag & drop
+  fpsVal.textContent = (VIDEO_INTERVAL_MS / 1000).toFixed(0);
+
+  // ── Mode toggle ──────────────────────────────────────────────────────────────
+  document.querySelectorAll('.mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const m = btn.dataset.mode;
+      if (m === mode) return;
+      mode = m;
+      document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
+      if (mode === 'image') {
+        stopCamera();
+        cameraSection.style.display = 'none';
+        imageSection.style.display  = 'block';
+        resultsEl.style.display     = 'none';
+        resetBtn.style.display      = 'none';
+        setStatus('');
+      } else {
+        cameraSection.style.display = 'block';
+        imageSection.style.display  = 'none';
+        resultsEl.style.display     = 'none';
+        resetBtn.style.display      = 'none';
+        setStatus('');
+      }
+    });
+  });
+
+  // ── Image mode ───────────────────────────────────────────────────────────────
   dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
   dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
   dropzone.addEventListener('drop', e => {
@@ -283,13 +453,15 @@
       const img = new Image();
       img.onload = () => {
         currentImage = img;
-        canvas.width = img.naturalWidth;
+        canvas.width  = img.naturalWidth;
         canvas.height = img.naturalHeight;
         ctx.drawImage(img, 0, 0);
-        previewWrap.style.display = 'block';
-        runBtn.style.display = 'block';
-        resultsEl.style.display = 'none';
-        resetBtn.style.display = 'none';
+        // Hide dropzone, show preview
+        dropzone.style.display      = 'none';
+        previewWrap.style.display   = 'block';
+        runBtn.style.display        = 'block';
+        resultsEl.style.display     = 'none';
+        resetBtn.style.display      = 'none';
         setStatus('');
       };
       img.src = e.target.result;
@@ -302,40 +474,14 @@
     runBtn.disabled = true;
     setStatus('Running inference…');
     resultsEl.style.display = 'none';
-
     try {
-      const res = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: currentBase64 })
-      });
-
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      const data = await res.json();
-
-      // Redraw clean image before overlays
+      const predictions = await runInference(currentBase64);
       ctx.drawImage(currentImage, 0, 0);
-
-      // Parse predictions — handle various response shapes
-      let predictions = [];
-      const result = data.result;
-      if (Array.isArray(result)) {
-        // result is array of workflow outputs
-        for (const item of result) {
-          if (item?.predictions?.predictions) predictions.push(...item.predictions.predictions);
-          else if (item?.predictions) predictions.push(...(Array.isArray(item.predictions) ? item.predictions : []));
-        }
-      } else if (result?.predictions?.predictions) {
-        predictions = result.predictions.predictions;
-      } else if (result?.predictions) {
-        predictions = result.predictions;
-      }
-
-      drawBoxes(predictions);
+      drawBoxesOnContext(ctx, canvas.width, canvas.height, predictions);
       showDetections(predictions);
       setStatus(`${predictions.length} object${predictions.length !== 1 ? 's' : ''} detected`, 'success');
       resultsEl.style.display = 'block';
-      resetBtn.style.display = 'inline-block';
+      resetBtn.style.display  = 'inline-block';
     } catch (err) {
       setStatus(`Error: ${err.message}`, 'error');
     } finally {
@@ -343,30 +489,145 @@
     }
   });
 
-  function drawBoxes(predictions) {
-    const scaleX = canvas.width;
-    const scaleY = canvas.height;
+  resetBtn.addEventListener('click', () => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    previewWrap.style.display = 'none';
+    runBtn.style.display      = 'none';
+    resetBtn.style.display    = 'none';
+    resultsEl.style.display   = 'none';
+    // Show dropzone again
+    dropzone.style.display    = 'block';
+    setStatus('');
+    fileInput.value   = '';
+    currentBase64     = null;
+    currentImage      = null;
+  });
 
+  // ── Video mode ───────────────────────────────────────────────────────────────
+  startCamBtn.addEventListener('click', startCamera);
+  stopCamBtn.addEventListener('click', stopCamera);
+
+  async function startCamera() {
+    try {
+      videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      video.srcObject = videoStream;
+      await video.play();
+
+      // Size overlay canvas to match video element once metadata loaded
+      video.addEventListener('loadedmetadata', () => {
+        videoCanvas.width  = video.videoWidth;
+        videoCanvas.height = video.videoHeight;
+      }, { once: true });
+
+      startCamBtn.disabled       = true;
+      stopCamBtn.style.display   = 'inline-block';
+      fpsIndicator.style.display = 'block';
+      setStatus('Camera active — sending frames…');
+
+      // Kick off polling
+      scheduleNextFrame();
+    } catch (err) {
+      setStatus(`Camera error: ${err.message}`, 'error');
+    }
+  }
+
+  function stopCamera() {
+    if (videoTimer) { clearTimeout(videoTimer); videoTimer = null; }
+    if (videoStream) {
+      videoStream.getTracks().forEach(t => t.stop());
+      videoStream = null;
+    }
+    video.srcObject = null;
+    vCtx.clearRect(0, 0, videoCanvas.width, videoCanvas.height);
+    startCamBtn.disabled       = false;
+    stopCamBtn.style.display   = 'none';
+    fpsIndicator.style.display = 'none';
+    resultsEl.style.display    = 'none';
+    setStatus('');
+  }
+
+  function scheduleNextFrame() {
+    videoTimer = setTimeout(async () => {
+      if (!videoStream || inferring) {
+        scheduleNextFrame();
+        return;
+      }
+      inferring = true;
+      try {
+        const base64 = captureVideoFrame();
+        if (base64) {
+          const predictions = await runInference(base64);
+          // Redraw overlay
+          vCtx.clearRect(0, 0, videoCanvas.width, videoCanvas.height);
+          drawBoxesOnContext(vCtx, videoCanvas.width, videoCanvas.height, predictions);
+          showDetections(predictions);
+          setStatus(`${predictions.length} object${predictions.length !== 1 ? 's' : ''} detected`, predictions.length > 0 ? 'success' : '');
+          resultsEl.style.display = 'block';
+        }
+      } catch (err) {
+        setStatus(`Error: ${err.message}`, 'error');
+      } finally {
+        inferring = false;
+        if (videoStream) scheduleNextFrame(); // keep going only if camera still on
+      }
+    }, VIDEO_INTERVAL_MS);
+  }
+
+  function captureVideoFrame() {
+    if (!video.videoWidth) return null;
+    // Use a temporary off-screen canvas to grab the frame
+    const tmp = document.createElement('canvas');
+    tmp.width  = video.videoWidth;
+    tmp.height = video.videoHeight;
+    tmp.getContext('2d').drawImage(video, 0, 0);
+    // Compress to JPEG at 0.8 quality to keep payload small for free tier
+    return tmp.toDataURL('image/jpeg', 0.8).split(',')[1];
+  }
+
+  // ── Shared inference ─────────────────────────────────────────────────────────
+  async function runInference(base64) {
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: base64 })
+    });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    const data = await res.json();
+
+    let predictions = [];
+    const result = data.result;
+    if (Array.isArray(result)) {
+      for (const item of result) {
+        if (item?.predictions?.predictions) predictions.push(...item.predictions.predictions);
+        else if (item?.predictions) predictions.push(...(Array.isArray(item.predictions) ? item.predictions : []));
+      }
+    } else if (result?.predictions?.predictions) {
+      predictions = result.predictions.predictions;
+    } else if (result?.predictions) {
+      predictions = result.predictions;
+    }
+    return predictions;
+  }
+
+  // ── Drawing ──────────────────────────────────────────────────────────────────
+  function drawBoxesOnContext(context, w, h, predictions) {
     predictions.forEach(p => {
-      const x = (p.x - p.width / 2);
-      const y = (p.y - p.height / 2);
-      const w = p.width;
-      const h = p.height;
+      const x    = p.x - p.width  / 2;
+      const y    = p.y - p.height / 2;
       const conf = Math.round((p.confidence || 0) * 100);
 
-      ctx.strokeStyle = '#c8f542';
-      ctx.lineWidth = Math.max(2, canvas.width * 0.002);
-      ctx.strokeRect(x, y, w, h);
+      context.strokeStyle = '#c8f542';
+      context.lineWidth   = Math.max(2, w * 0.002);
+      context.strokeRect(x, y, p.width, p.height);
 
-      // Label background
-      const label = `${p.class || 'object'} ${conf}%`;
-      const fontSize = Math.max(12, canvas.width * 0.013);
-      ctx.font = `500 ${fontSize}px 'IBM Plex Mono', monospace`;
-      const textW = ctx.measureText(label).width;
-      ctx.fillStyle = '#c8f542';
-      ctx.fillRect(x, y - fontSize - 6, textW + 10, fontSize + 8);
-      ctx.fillStyle = '#0e0e0e';
-      ctx.fillText(label, x + 5, y - 4);
+      const label    = `${p.class || 'object'} ${conf}%`;
+      const fontSize = Math.max(12, w * 0.013);
+      context.font      = `500 ${fontSize}px 'IBM Plex Mono', monospace`;
+      const textW       = context.measureText(label).width;
+      context.fillStyle = '#c8f542';
+      context.fillRect(x, y - fontSize - 6, textW + 10, fontSize + 8);
+      context.fillStyle = '#0e0e0e';
+      context.fillText(label, x + 5, y - 4);
     });
   }
 
@@ -380,7 +641,7 @@
       .sort((a, b) => b.confidence - a.confidence)
       .forEach(p => {
         const conf = Math.round((p.confidence || 0) * 100);
-        const div = document.createElement('div');
+        const div  = document.createElement('div');
         div.className = 'detection-item';
         div.innerHTML = `<span class="label">${p.class || 'object'}</span><span class="conf">${conf}%</span>`;
         detectionsEl.appendChild(div);
@@ -389,20 +650,8 @@
 
   function setStatus(msg, type = '') {
     statusEl.textContent = msg;
-    statusEl.className = type;
+    statusEl.className   = type;
   }
-
-  resetBtn.addEventListener('click', () => {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    previewWrap.style.display = 'none';
-    runBtn.style.display = 'none';
-    resetBtn.style.display = 'none';
-    resultsEl.style.display = 'none';
-    setStatus('');
-    fileInput.value = '';
-    currentBase64 = null;
-    currentImage = null;
-  });
 </script>
 </body>
 </html>
