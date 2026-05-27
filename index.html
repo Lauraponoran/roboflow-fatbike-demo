@@ -118,6 +118,7 @@
       cursor: pointer;
       width: 100%;
       height: 100%;
+      z-index: 1;
     }
 
     #dropzone .icon {
@@ -152,7 +153,7 @@
       display: block;
     }
 
-    /* Overlay canvas sits on top of video */
+    /* Overlay canvas sits on top of video — must match video element pixels exactly */
     #video-canvas {
       position: absolute;
       top: 0; left: 0;
@@ -507,16 +508,24 @@
   startCamBtn.addEventListener('click', startCamera);
   stopCamBtn.addEventListener('click', stopCamera);
 
+  // Keep overlay canvas in sync with the displayed video size (not raw stream res)
+  const videoResizeObserver = new ResizeObserver(() => {
+    if (!videoStream) return;
+    videoCanvas.width  = video.clientWidth;
+    videoCanvas.height = video.clientHeight;
+  });
+  videoResizeObserver.observe(video);
+
   async function startCamera() {
     try {
       videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
       video.srcObject = videoStream;
       await video.play();
 
-      // Size overlay canvas to match video element once metadata loaded
+      // Set initial canvas size once video is visible
       video.addEventListener('loadedmetadata', () => {
-        videoCanvas.width  = video.videoWidth;
-        videoCanvas.height = video.videoHeight;
+        videoCanvas.width  = video.clientWidth;
+        videoCanvas.height = video.clientHeight;
       }, { once: true });
 
       startCamBtn.disabled       = true;
@@ -557,9 +566,11 @@
         const base64 = captureVideoFrame();
         if (base64) {
           const predictions = await runInference(base64);
-          // Redraw overlay
+          // Redraw overlay — scale from raw video res → displayed canvas size
           vCtx.clearRect(0, 0, videoCanvas.width, videoCanvas.height);
-          drawBoxesOnContext(vCtx, videoCanvas.width, videoCanvas.height, predictions);
+          const scaleX = videoCanvas.width  / video.videoWidth;
+          const scaleY = videoCanvas.height / video.videoHeight;
+          drawBoxesOnContext(vCtx, videoCanvas.width, videoCanvas.height, predictions, scaleX, scaleY);
           showDetections(predictions);
           setStatus(`${predictions.length} object${predictions.length !== 1 ? 's' : ''} detected`, predictions.length > 0 ? 'success' : '');
           resultsEl.style.display = 'block';
@@ -610,18 +621,22 @@
   }
 
   // ── Drawing ──────────────────────────────────────────────────────────────────
-  function drawBoxesOnContext(context, w, h, predictions) {
+  // For video mode: API coords are in raw video resolution, canvas is display resolution.
+  // Pass scaleX/scaleY to map between them. For image mode both are 1.
+  function drawBoxesOnContext(context, canvasW, canvasH, predictions, scaleX = 1, scaleY = 1) {
     predictions.forEach(p => {
-      const x    = p.x - p.width  / 2;
-      const y    = p.y - p.height / 2;
+      const x = (p.x - p.width  / 2) * scaleX;
+      const y = (p.y - p.height / 2) * scaleY;
+      const w = p.width  * scaleX;
+      const h = p.height * scaleY;
       const conf = Math.round((p.confidence || 0) * 100);
 
       context.strokeStyle = '#c8f542';
-      context.lineWidth   = Math.max(2, w * 0.002);
-      context.strokeRect(x, y, p.width, p.height);
+      context.lineWidth   = Math.max(1.5, canvasW * 0.003);
+      context.strokeRect(x, y, w, h);
 
       const label    = `${p.class || 'object'} ${conf}%`;
-      const fontSize = Math.max(12, w * 0.013);
+      const fontSize = Math.max(11, Math.min(16, canvasW * 0.022));
       context.font      = `500 ${fontSize}px 'IBM Plex Mono', monospace`;
       const textW       = context.measureText(label).width;
       context.fillStyle = '#c8f542';
