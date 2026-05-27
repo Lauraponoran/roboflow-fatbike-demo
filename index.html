@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fatbike Detector</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0e0e0e;
+      --surface: #161616;
+      --border: #2a2a2a;
+      --text: #e8e8e8;
+      --muted: #666;
+      --accent: #c8f542;
+      --accent-dim: rgba(200, 245, 66, 0.12);
+      --font-mono: 'IBM Plex Mono', monospace;
+      --font-sans: 'IBM Plex Sans', sans-serif;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 48px 24px;
+    }
+
+    header {
+      width: 100%;
+      max-width: 720px;
+      margin-bottom: 48px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 24px;
+    }
+
+    header h1 {
+      font-family: var(--font-mono);
+      font-size: 1.1rem;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      color: var(--accent);
+      text-transform: uppercase;
+    }
+
+    header p {
+      margin-top: 6px;
+      font-size: 0.85rem;
+      color: var(--muted);
+      font-weight: 300;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 720px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 32px;
+    }
+
+    /* Drop zone */
+    #dropzone {
+      border: 1px dashed var(--border);
+      padding: 48px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      position: relative;
+    }
+
+    #dropzone:hover, #dropzone.dragover {
+      border-color: var(--accent);
+      background: var(--accent-dim);
+    }
+
+    #dropzone input {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+      height: 100%;
+    }
+
+    #dropzone .icon {
+      font-size: 2rem;
+      margin-bottom: 12px;
+      opacity: 0.4;
+    }
+
+    #dropzone p {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    #dropzone p span {
+      color: var(--accent);
+    }
+
+    /* Preview */
+    #preview-wrap {
+      display: none;
+      margin-top: 24px;
+      position: relative;
+    }
+
+    #preview-wrap canvas {
+      width: 100%;
+      display: block;
+    }
+
+    /* Button */
+    #run-btn {
+      display: none;
+      margin-top: 20px;
+      width: 100%;
+      padding: 14px;
+      background: var(--accent);
+      color: #0e0e0e;
+      border: none;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    #run-btn:hover { opacity: 0.85; }
+    #run-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Status */
+    #status {
+      margin-top: 16px;
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      color: var(--muted);
+      min-height: 1.2em;
+    }
+
+    #status.error { color: #ff6b6b; }
+    #status.success { color: var(--accent); }
+
+    /* Results */
+    #results {
+      display: none;
+      margin-top: 28px;
+      border-top: 1px solid var(--border);
+      padding-top: 24px;
+    }
+
+    #results h2 {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+
+    #detections {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .detection-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      animation: fadeIn 0.3s ease forwards;
+    }
+
+    .detection-item .label { color: var(--text); }
+    .detection-item .conf {
+      color: var(--accent);
+      font-size: 0.75rem;
+    }
+
+    .no-detections {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: var(--muted);
+      padding: 10px 0;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Reset link */
+    #reset {
+      display: none;
+      margin-top: 16px;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--muted);
+      background: none;
+      border: none;
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+    #reset:hover { color: var(--text); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Fatbike // Small Object Detection</h1>
+  <p>SAHI-based detection via Roboflow serverless inference</p>
+</header>
+
+<div class="card">
+  <div id="dropzone">
+    <input type="file" id="file-input" accept="image/*" />
+    <div class="icon">⊕</div>
+    <p>Drop an image or <span>click to upload</span></p>
+  </div>
+
+  <div id="preview-wrap">
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <button id="run-btn">Run Detection</button>
+  <div id="status"></div>
+
+  <div id="results">
+    <h2>Detections</h2>
+    <div id="detections"></div>
+  </div>
+
+  <button id="reset">← start over</button>
+</div>
+
+<script>
+  const API_URL = 'https://roboflow-fatbike-demo.onrender.com/infer';
+
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('file-input');
+  const previewWrap = document.getElementById('preview-wrap');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const runBtn = document.getElementById('run-btn');
+  const statusEl = document.getElementById('status');
+  const resultsEl = document.getElementById('results');
+  const detectionsEl = document.getElementById('detections');
+  const resetBtn = document.getElementById('reset');
+
+  let currentImage = null;
+  let currentBase64 = null;
+
+  // Drag & drop
+  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+  dropzone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzone.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (file) loadImage(file);
+  });
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files[0]) loadImage(fileInput.files[0]);
+  });
+
+  function loadImage(file) {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        currentImage = img;
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        ctx.drawImage(img, 0, 0);
+        previewWrap.style.display = 'block';
+        runBtn.style.display = 'block';
+        resultsEl.style.display = 'none';
+        resetBtn.style.display = 'none';
+        setStatus('');
+      };
+      img.src = e.target.result;
+      currentBase64 = e.target.result.split(',')[1];
+    };
+    reader.readAsDataURL(file);
+  }
+
+  runBtn.addEventListener('click', async () => {
+    runBtn.disabled = true;
+    setStatus('Running inference…');
+    resultsEl.style.display = 'none';
+
+    try {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: currentBase64 })
+      });
+
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      const data = await res.json();
+
+      // Redraw clean image before overlays
+      ctx.drawImage(currentImage, 0, 0);
+
+      // Parse predictions — handle various response shapes
+      let predictions = [];
+      const result = data.result;
+      if (Array.isArray(result)) {
+        // result is array of workflow outputs
+        for (const item of result) {
+          if (item?.predictions?.predictions) predictions.push(...item.predictions.predictions);
+          else if (item?.predictions) predictions.push(...(Array.isArray(item.predictions) ? item.predictions : []));
+        }
+      } else if (result?.predictions?.predictions) {
+        predictions = result.predictions.predictions;
+      } else if (result?.predictions) {
+        predictions = result.predictions;
+      }
+
+      drawBoxes(predictions);
+      showDetections(predictions);
+      setStatus(`${predictions.length} object${predictions.length !== 1 ? 's' : ''} detected`, 'success');
+      resultsEl.style.display = 'block';
+      resetBtn.style.display = 'inline-block';
+    } catch (err) {
+      setStatus(`Error: ${err.message}`, 'error');
+    } finally {
+      runBtn.disabled = false;
+    }
+  });
+
+  function drawBoxes(predictions) {
+    const scaleX = canvas.width;
+    const scaleY = canvas.height;
+
+    predictions.forEach(p => {
+      const x = (p.x - p.width / 2);
+      const y = (p.y - p.height / 2);
+      const w = p.width;
+      const h = p.height;
+      const conf = Math.round((p.confidence || 0) * 100);
+
+      ctx.strokeStyle = '#c8f542';
+      ctx.lineWidth = Math.max(2, canvas.width * 0.002);
+      ctx.strokeRect(x, y, w, h);
+
+      // Label background
+      const label = `${p.class || 'object'} ${conf}%`;
+      const fontSize = Math.max(12, canvas.width * 0.013);
+      ctx.font = `500 ${fontSize}px 'IBM Plex Mono', monospace`;
+      const textW = ctx.measureText(label).width;
+      ctx.fillStyle = '#c8f542';
+      ctx.fillRect(x, y - fontSize - 6, textW + 10, fontSize + 8);
+      ctx.fillStyle = '#0e0e0e';
+      ctx.fillText(label, x + 5, y - 4);
+    });
+  }
+
+  function showDetections(predictions) {
+    detectionsEl.innerHTML = '';
+    if (predictions.length === 0) {
+      detectionsEl.innerHTML = '<div class="no-detections">No objects detected.</div>';
+      return;
+    }
+    predictions
+      .sort((a, b) => b.confidence - a.confidence)
+      .forEach(p => {
+        const conf = Math.round((p.confidence || 0) * 100);
+        const div = document.createElement('div');
+        div.className = 'detection-item';
+        div.innerHTML = `<span class="label">${p.class || 'object'}</span><span class="conf">${conf}%</span>`;
+        detectionsEl.appendChild(div);
+      });
+  }
+
+  function setStatus(msg, type = '') {
+    statusEl.textContent = msg;
+    statusEl.className = type;
+  }
+
+  resetBtn.addEventListener('click', () => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    previewWrap.style.display = 'none';
+    runBtn.style.display = 'none';
+    resetBtn.style.display = 'none';
+    resultsEl.style.display = 'none';
+    setStatus('');
+    fileInput.value = '';
+    currentBase64 = null;
+    currentImage = null;
+  });
+</script>
+</body>
+</html>
