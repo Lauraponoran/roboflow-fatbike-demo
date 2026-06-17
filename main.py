@@ -1,10 +1,12 @@
 import os
-import json
-import requests
+import base64
+import tempfile
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+from inference_sdk import InferenceHTTPClient
 
 app = FastAPI()
 
@@ -15,12 +17,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ROBOFLOW_URL = (
-    "https://serverless.roboflow.com/"
-    "tapp-workspace/workflows/small-object-detection-sahi"
-)
+API_KEY = os.getenv("ROBOFLOW_API_KEY")
 
-session = requests.Session()
+if not API_KEY:
+    raise RuntimeError("ROBOFLOW_API_KEY environment variable not set")
+
+client = InferenceHTTPClient(
+    api_url="https://serverless.roboflow.com",
+    api_key=API_KEY
+)
 
 
 class InferenceRequest(BaseModel):
@@ -29,79 +34,43 @@ class InferenceRequest(BaseModel):
 
 
 def clean_base64_image(image: str) -> str:
-    """
-    Removes browser-style data URI prefixes if present.
-
-    Example:
-    data:image/jpeg;base64,/9j/4AAQ...
-    ->
-    /9j/4AAQ...
-    """
     if image.startswith("data:image"):
         image = image.split(",", 1)[1]
-
     return image.strip()
-
-
-def build_payload(image: str):
-    api_key = os.getenv("ROBOFLOW_API_KEY")
-
-    if not api_key:
-        raise RuntimeError("ROBOFLOW_API_KEY environment variable not set")
-
-    image = clean_base64_image(image)
-
-    return {
-        "api_key": api_key,
-        "inputs": {
-            "image": {
-                "type": "base64",
-                "value": image
-            }
-        }
-    }
 
 
 @app.post("/infer")
 async def run_inference(req: InferenceRequest):
-    try:
-        payload = build_payload(req.image)
+    temp_path = None
 
-        response = session.post(
-            ROBOFLOW_URL,
-            json=payload,
-            timeout=30,
+    try:
+        image_data = clean_base64_image(req.image)
+
+        image_bytes = base64.b64decode(image_data)
+
+        with tempfile.NamedTemporaryFile(
+            suffix=".jpg",
+            delete=False
+        ) as temp_file:
+            temp_file.write(image_bytes)
+            temp_path = temp_file.name
+
+        result = client.run_workflow(
+            workspace_name="tapp-workspace",
+            workflow_id="small-object-detection-sahi",
+            images={
+                "image": temp_path
+            },
+            use_cache=req.use_cache
         )
 
-        try:
-            result = response.json()
-        except Exception:
-            result = {
-                "raw_response": response.text
-            }
-
-        print("\n=== ROBOFLOW REQUEST ===")
-        print(f"Status: {response.status_code}")
-
-        if isinstance(result, dict):
-            print(json.dumps(result, indent=2))
-        else:
-            print(result)
-
-        if not response.ok:
-            raise HTTPException(
-                status_code=response.status_code,
-                detail=result
-            )
+        print("=== ROBOFLOW SDK RESPONSE ===")
+        print(result)
 
         return {
             "success": True,
-            "status_code": response.status_code,
             "result": result
         }
-
-    except HTTPException:
-        raise
 
     except Exception as e:
         raise HTTPException(
@@ -109,42 +78,41 @@ async def run_inference(req: InferenceRequest):
             detail=str(e)
         )
 
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+
 
 @app.post("/infer-debug")
 async def run_inference_debug(req: InferenceRequest):
-    try:
-        import base64
+    temp_path = None
 
+    try:
         image_data = clean_base64_image(req.image)
 
-        try:
-            decoded = base64.b64decode(image_data)
-            decode_error = None
-        except Exception as e:
-            decoded = b""
-            decode_error = str(e)
+        image_bytes = base64.b64decode(image_data)
 
-        payload = build_payload(req.image)
+        with tempfile.NamedTemporaryFile(
+            suffix=".jpg",
+            delete=False
+        ) as temp_file:
+            temp_file.write(image_bytes)
+            temp_path = temp_file.name
 
-        response = session.post(
-            ROBOFLOW_URL,
-            json=payload,
-            timeout=30,
+        result = client.run_workflow(
+            workspace_name="tapp-workspace",
+            workflow_id="small-object-detection-sahi",
+            images={
+                "image": temp_path
+            },
+            use_cache=False
         )
-
-        try:
-            result = response.json()
-        except Exception:
-            result = response.text
 
         return {
             "base64_length": len(image_data),
-            "decoded_length": len(decoded),
-            "first_50_chars": image_data[:50],
-            "first_20_bytes": list(decoded[:20]),
-            "decode_error": decode_error,
-            "request_url": ROBOFLOW_URL,
-            "status_code": response.status_code,
+            "decoded_length": len(image_bytes),
+            "temp_file_exists": os.path.exists(temp_path),
+            "temp_file_size": os.path.getsize(temp_path),
             "response": result
         }
 
@@ -154,11 +122,14 @@ async def run_inference_debug(req: InferenceRequest):
             detail=str(e)
         )
 
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+
 
 @app.get("/health")
 def health():
     return {
         "status": "ok",
-        "roboflow_url": ROBOFLOW_URL,
-        "api_key_present": bool(os.getenv("ROBOFLOW_API_KEY"))
+        "api_key_present": bool(API_KEY)
     }
