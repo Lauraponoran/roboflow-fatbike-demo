@@ -26,10 +26,24 @@ class InferenceRequest(BaseModel):
 @app.post("/infer")
 async def run_inference(req: InferenceRequest):
     try:
+        # The workflow unexpectedly requires a `video` (WorkflowVideoMetadata)
+        # input even though we're only sending a static image. This dummy
+        # placeholder satisfies that requirement until the workflow itself
+        # is fixed to not require it.
+        dummy_video_metadata = {
+            "video_identifier": "dummy-video-1",
+            "frame_number": 0,
+            "frame_timestamp": "2026-06-17T00:00:00Z",
+            "fps": 30,
+            "measured_fps": 30,
+            "comes_from_video_file": False
+        }
+
         result = client.run_workflow(
             workspace_name="tapp-workspace",
             workflow_id="small-object-detection-sahi",
             images={"image": req.image},
+            parameters={"video": dummy_video_metadata},
             use_cache=req.use_cache
         )
         return {"success": True, "result": result}
