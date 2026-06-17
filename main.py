@@ -113,6 +113,17 @@ async def run_inference(req: InferenceRequest):
 @app.post("/infer-debug")
 async def run_inference_debug(req: InferenceRequest):
     try:
+        import base64
+
+        image_data = clean_base64_image(req.image)
+
+        try:
+            decoded = base64.b64decode(image_data)
+            decode_error = None
+        except Exception as e:
+            decoded = b""
+            decode_error = str(e)
+
         payload = build_payload(req.image)
 
         response = session.post(
@@ -127,8 +138,12 @@ async def run_inference_debug(req: InferenceRequest):
             result = response.text
 
         return {
+            "base64_length": len(image_data),
+            "decoded_length": len(decoded),
+            "first_50_chars": image_data[:50],
+            "first_20_bytes": list(decoded[:20]),
+            "decode_error": decode_error,
             "request_url": ROBOFLOW_URL,
-            "request_payload": payload,
             "status_code": response.status_code,
             "response": result
         }
